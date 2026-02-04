@@ -14,11 +14,11 @@
 
 ## 保存路径布局（默认）
 
-`{root_dir}/{prefix}/{tag_path}/pid_{pid}/cap_{capture_count}/{name}.{ext}`
+`{root_dir}/{tag_path}/pid_{pid}/cap_{capture_count}/{name}.{ext}`
 
 其中：
 - `tag_path` 为嵌套 `scope(tag)` 的 tag 拼接路径（例如 `train/attn`）
-- `capture_count` 为该 `(prefix, tag_path, pid)` 下的捕获次数，从 0 开始；每个 step 内首次 dump 才会触发并在 `step()` 后自增
+- `capture_count` 为该 `(root_dir, tag_path, pid)` 下的捕获次数，从 0 开始；每个 step 内首次 dump 才会触发并在 `step()` 后自增
 
 ## 示例
 
@@ -30,7 +30,7 @@ tc.setup("/tmp/tencap", interval=10, max_captures=3)
 
 for _ in range(100):
     x = np.arange(6).reshape(2, 3)
-    with tc.scope("train", prefix="exp001"):
+    with tc.scope("train"):
         tc.dump_np(x, name="x")
     tc.step()
 ```

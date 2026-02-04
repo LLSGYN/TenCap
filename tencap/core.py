@@ -22,13 +22,11 @@ class _Config:
     enabled: bool = True
     interval: int = 1
     max_captures: int | None = None
-    default_prefix: str | None = None
 
 
 @dataclasses.dataclass
 class _Scope:
     tag: str
-    prefix: str | None = None
     enabled: bool | None = None
     interval: int | None = None
     max_captures: int | None = None
@@ -46,7 +44,7 @@ class _State:
     config: _Config = dataclasses.field(default_factory=_Config)
     step: int = 0
     pid: int = dataclasses.field(default_factory=os.getpid)
-    runtimes: dict[tuple[str, str], _Runtime] = dataclasses.field(default_factory=dict)
+    runtimes: dict[tuple[Path, str], _Runtime] = dataclasses.field(default_factory=dict)
     lock: threading.RLock = dataclasses.field(default_factory=threading.RLock)
 
 
@@ -72,14 +70,13 @@ def setup(
     enabled: bool | object = _UNSET,
     interval: int | object = _UNSET,
     max_captures: int | None | object = _UNSET,
-    default_prefix: str | None | object = _UNSET,
     mkdir: bool = True,
 ) -> None:
     """
     Global initialization. Can be called multiple times to update config.
 
     - `interval`: capture every N steps (N>=1).
-    - `max_captures`: per (prefix, tag_path, pid) maximum capture rounds.
+    - `max_captures`: per (root_dir, tag_path, pid) maximum capture rounds.
     """
     with _STATE.lock:
         _refresh_pid_locked()
@@ -102,8 +99,6 @@ def setup(
                 if max_captures < 0:  # type: ignore[operator]
                     raise ValueError(f"max_captures must be >= 0, got {max_captures}")
                 _STATE.config.max_captures = int(max_captures)  # type: ignore[arg-type]
-        if default_prefix is not _UNSET:
-            _STATE.config.default_prefix = None if default_prefix is None else str(default_prefix)
 
         if _STATE.config.root_dir is None:
             raise ValueError("root_dir is required on first setup() call")
@@ -116,7 +111,6 @@ def setup(
 def scope(
     tag: str,
     *,
-    prefix: str | None = None,
     enabled: bool | None = None,
     interval: int | None = None,
     max_captures: int | None = None,
@@ -128,14 +122,14 @@ def scope(
         raise ValueError("tag must be a non-empty string")
     if not any(_sanitize_part(p) for p in _split_pathlike(tag)):
         raise ValueError(f"tag resolves to empty path after sanitization: {tag!r}")
-    if prefix is not None and prefix != "" and not _sanitize_rel_dir(prefix):
-        raise ValueError(f"prefix resolves to empty path after sanitization: {prefix!r}")
     if interval is not None and interval < 1:
         raise ValueError(f"interval must be >= 1, got {interval}")
     if max_captures is not None and max_captures < 0:
         raise ValueError(f"max_captures must be >= 0, got {max_captures}")
 
-    token = _SCOPE_STACK.set([*_SCOPE_STACK.get(), _Scope(tag=tag, prefix=prefix, enabled=enabled, interval=interval, max_captures=max_captures)])
+    token = _SCOPE_STACK.set(
+        [*_SCOPE_STACK.get(), _Scope(tag=tag, enabled=enabled, interval=interval, max_captures=max_captures)]
+    )
     try:
         yield
     finally:
@@ -237,11 +231,8 @@ def _get_or_start_capture_dir_locked() -> Path | None:
     effective_enabled = config.enabled
     effective_interval = config.interval
     effective_max_captures = config.max_captures
-    effective_prefix = config.default_prefix
 
     for scope in scope_stack:
-        if scope.prefix is not None:
-            effective_prefix = scope.prefix
         if scope.enabled is not None:
             effective_enabled = scope.enabled
         if scope.interval is not None:
@@ -259,9 +250,8 @@ def _get_or_start_capture_dir_locked() -> Path | None:
         return None
 
     tag_path = _sanitize_rel_dir(_join_tag_path(scope_stack))
-    prefix_path = _sanitize_rel_dir(effective_prefix) if effective_prefix else ""
-    key = (prefix_path, tag_path)
-    runtime = _STATE.runtimes.setdefault(key, _Runtime())
+    root_dir = config.root_dir
+    runtime = _STATE.runtimes.setdefault((root_dir, tag_path), _Runtime())
 
     if effective_max_captures is not None and runtime.capture_count >= effective_max_captures:
         return None
@@ -269,19 +259,16 @@ def _get_or_start_capture_dir_locked() -> Path | None:
     if runtime.active_step == step_idx and runtime.active_dir is not None:
         return runtime.active_dir
 
-    root_dir = config.root_dir
     pid_part = f"pid_{_STATE.pid}"
     cap_part = f"cap_{runtime.capture_count:06d}"
 
     capture_dir = root_dir
-    if prefix_path:
-        capture_dir = capture_dir / prefix_path
     if tag_path:
         capture_dir = capture_dir / tag_path
     capture_dir = capture_dir / pid_part / cap_part
     capture_dir.mkdir(parents=True, exist_ok=True)
 
-    _write_meta_json_once(capture_dir, prefix=prefix_path, tag_path=tag_path, pid=_STATE.pid, step=step_idx, capture_count=runtime.capture_count)
+    _write_meta_json_once(capture_dir, tag_path=tag_path, pid=_STATE.pid, step=step_idx, capture_count=runtime.capture_count)
 
     runtime.active_step = step_idx
     runtime.active_dir = capture_dir
@@ -298,7 +285,6 @@ def _refresh_pid_locked() -> None:
 def _write_meta_json_once(
     capture_dir: Path,
     *,
-    prefix: str,
     tag_path: str,
     pid: int,
     step: int,
@@ -309,7 +295,6 @@ def _write_meta_json_once(
         return
 
     payload = {
-        "prefix": prefix,
         "tag_path": tag_path,
         "pid": pid,
         "step": step,

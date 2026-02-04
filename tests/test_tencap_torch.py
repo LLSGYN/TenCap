@@ -19,7 +19,7 @@ class TestTenCapTorch(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             tc.setup(Path(td), interval=1, max_captures=1)
-            with tc.scope("torch", prefix="p"):
+            with tc.scope("torch"):
                 with self.assertRaises(ModuleNotFoundError):
                     tc.dump_torch(object(), name="x")
 
@@ -31,7 +31,7 @@ class TestTenCapTorch(unittest.TestCase):
             tc.setup(Path(td), interval=1, max_captures=2)
 
             t = torch.arange(6, dtype=torch.float32).reshape(2, 3)
-            with tc.scope("torch", prefix="p"):
+            with tc.scope("torch"):
                 p = tc.dump_torch(t, name="t")
 
             self.assertIsNotNone(p)
@@ -49,11 +49,10 @@ class TestTenCapTorch(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             tc.setup(Path(td), interval=1, max_captures=1)
-            with tc.scope("torch", prefix="p"):
+            with tc.scope("torch"):
                 with self.assertRaises(TypeError):
                     tc.dump_torch(np.arange(3), name="x")
 
 
 if __name__ == "__main__":
     unittest.main()
-
